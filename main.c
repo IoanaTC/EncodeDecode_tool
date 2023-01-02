@@ -9,8 +9,15 @@
 #include<sys/mman.h>
 #include<sys/wait.h>
 #include<time.h>
-#define SIZE 4096
+#include<ctype.h>
+
+#define SIZE 1024
 #define offset 200
+struct word_pointer{
+    char * location;
+    char * word;
+};
+typedef struct word_pointer word_pointer;
 
 // programul primeste un singur parametru => un fisier
 // - spre a fi criptat
@@ -21,7 +28,6 @@ int getNumber(int *permutation, int length);
 void generatePermutation(int * permutation, int length);
 
 int main(int argc, char *argv[]){
-    pid_t pid;
 
     if (argc == 2){
         // programul a primit un singur parametru, un fisier care trebuie criptat
@@ -39,135 +45,138 @@ int main(int argc, char *argv[]){
 
         int SRC_SIZE = stat_buf.st_size; // dimensiunea fisierului
 
-        // fisier de memorie partajata
-        char *shm_name = "sharedmem_file";
-        int shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
-        if(shm_fd < 0){
-            perror("Open shm mem error");
-            return errno;
-        }
-        // def dimensiune
-        if(ftruncate(shm_fd, SRC_SIZE) == -1){
-            perror("Truncate error");
+        // deschid fisierul sursa
+        int src_fd = open(src_path, O_RDWR);
+        if(src_fd < 0){
+            perror("Open src error");
             return errno;
         }
         // mapez sursa
-        void *shm_ptr = mmap(0, SRC_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+        void *src_map = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, src_fd, 0);
 
-        // copiez datele din fiserul sursa in fiserul de memorie partajata
-        pid = fork();
-        if(pid < 0){
-            perror("Copy data - Fork error");
+        // creez un fisier de memorie partajata pentru a stoca permutarile folosite
+        // de catre fiecare proces in parte
+        char *shm_keys = "keys_file";
+
+        int dst_key_fd = shm_open(shm_keys, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+        if(dst_key_fd < 0){
+            perror("Open shm_keys mem error");
             return errno;
         }
-        else if(pid == 0){
-            // procesul copil va executa copiere
-            char * cp_argv[] = {"cp", src_path, "/dev/shm/sharedmem_file", NULL}; // argumentele comenzii
-
-            if(execve("/usr/bin/cp", cp_argv, NULL) < 0){
-                perror("Copy Execve error");
-                return errno;
-            }
-            return 0;
+        // def dimensiune
+        if(ftruncate(dst_key_fd, SIZE) == -1){
+            perror("Truncate error");
+            return errno;
         }
-        else{
-            // procesul parinte realizeaza modificarile
-            wait(NULL);
 
-            // creez un fisier de memorie partajata si pentru a stoca permutarile folosite
-            // de catre fiecare proces in parte
-            char *shm_keys = "keys_file";
+        // mapez fisierul de permutari pentru a il putea formata
+        void *key_ptr = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, dst_key_fd, 0);
 
-            int dst_key_fd = shm_open(shm_keys, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
-            if(dst_key_fd < 0){
-                perror("Open shm_keys mem error");
-                return errno;
-            }
-            // def dimensiune
-            if(ftruncate(dst_key_fd, SIZE) == -1){
-                perror("Truncate error");
-                return errno;
-            }
+        // citesc datele din fisierul sursa
 
-            // mapez fisierul de permutari pentru a il putea formata
-            void *key_ptr = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, dst_key_fd, 0);
-
-            // citesc datele din fisierul sursa
-
-            // buffer in care voi citi datele din fisierul sursa
-            char *buff = (char*) malloc(SRC_SIZE * sizeof(char) + 1);
-            if(buff == NULL){
-                perror("Malloc failed");
-                return errno;
-            }
-            
-            // citirea datelor
-            size_t bytes_read = read(shm_fd, buff, SRC_SIZE);
+        // buffer in care voi citi datele din fisierul sursa
+        char *buff = (char*) malloc(SRC_SIZE * sizeof(char) + 1);
+        if(buff == NULL){
+            perror("Malloc failed");
+            return errno;
+        }
+        
+        // citirea datelor
+        size_t bytes_read = read(src_fd, buff, SRC_SIZE);
+        if(bytes_read < 0){
+            perror("Read failed");
+            return errno;
+        }
+        // ma asigur ca datele din fisier au fost corect citite
+        for(size_t index = bytes_read; index < SRC_SIZE; index += bytes_read){
+            bytes_read = read(src_fd, buff + index, SRC_SIZE - index);
             if(bytes_read < 0){
                 perror("Read failed");
                 return errno;
             }
-            // ma asigur ca datele din fisier au fost corect citite
-            for(size_t index = bytes_read; index < SRC_SIZE; index += bytes_read){
-                bytes_read = read(shm_fd, buff + index, SRC_SIZE - index);
-                if(bytes_read < 0){
-                    perror("Read failed");
-                    return errno;
-                }
-            }
-            buff[SRC_SIZE] = '\0';
-
-            // parcurg bufferul si extrag toate cuvintele
-            char * words[1000];
-            
-            int word_index = 0;
-            shm_ptr = strtok(buff, "\n ,.!?;"); // adaugarea mai multor semne de punctuatie  
-            while(shm_ptr != NULL){
-                words[word_index++] = (char*)shm_ptr;
-                shm_ptr = strtok(0, "\n ,.!?;");
-            }
-            int word_count = word_index;
-
-            // pentru fiecare cuvant
-            // generez o permutare si realizez criptarea acestuia
-            // salvez permutarea, respectiv cuvantul criptat in shm_keys, respectiv shm_name
-            pid_t encriptor_pid;
-            for(int index = 0; index < word_count; index ++){
-                
-                encriptor_pid = fork();
-
-                if(encriptor_pid < 0){
-                    perror("Encription - Fork error");
-                    return errno;
-                }
-                else if(encriptor_pid == 0){
-                    char * word = words[index]; //cuvantul curent
-                    int word_length = strlen(word); // lungimea cuvantului curent
-                    
-                    // generez o permutare
-
-                    int *permutation = (int*)malloc(sizeof(int) * word_length);
-                    // initializez permutarea                 
-                    for(int index = 0; index < word_length; index++){
-                        permutation[index] = index;
-                    }
-                    generatePermutation(permutation, word_length);
-                    // scriu permutarea in fisierul shm_keys
-
-                    int number = 0;
-                    for(int i = 0; i < word_length; i++){
-                        sprintf(key_ptr + (offset * index) + number, "%d ", permutation[i]);
-                        number = number + 2;
-                    }
-                    sprintf(key_ptr + (offset * index) + number, "\n");
-                    return 0;
-                }
-            }
-            for(int index = 0; index < word_count; index ++)
-                wait(NULL);
-
-            return 0;
         }
+        buff[SRC_SIZE] = '\0';
+        // parcurg bufferul si extrag toate cuvintele in vectorul de cuvinte
+        word_pointer words[1000];
+        int word_index = 0;
+        const char * delim = " \n";
+        char * src_ptr = strtok(buff, delim); // adaugarea mai multor semne de punctuatie 
+
+        while(src_ptr != NULL){
+                                    printf("%s ", (char *) src_ptr);
+
+            char * pointer = (char *) src_ptr;
+            int length = strlen(pointer);
+
+            word_pointer word;
+
+            if(isspace(pointer[length]))
+                pointer[length] = '\0';
+            if(isspace(pointer[0]))
+                pointer = pointer + 1;
+
+            word.word = pointer;
+
+            word.location = strstr((char*) src_map, pointer);
+
+            words[word_index] = word;
+            word_index = word_index + 1;
+
+            src_ptr = strtok(NULL, delim);
+        }
+        int word_count = word_index;
+
+        // for(int i=0; i< word_count; i++)
+        // {
+        //     printf("%s ", words[i].word);
+        // }
+        // pentru fiecare cuvant
+        // generez o permutare si realizez criptarea acestuia
+        // salvez permutarea, respectiv cuvantul criptat in shm_keys, respectiv shm_name
+        pid_t encriptor_pid;
+        for(int index = 0; index < word_count; index ++){
+            
+            encriptor_pid = fork();
+
+            if(encriptor_pid < 0){
+                perror("Encription - Fork error");
+                return errno;
+            }
+            else if(encriptor_pid == 0){
+                char * word = words[index].word; //cuvantul curent
+                int word_length = strlen(word); // lungimea cuvantului curent
+                
+                // generez o permutare
+
+                int *permutation = (int*)malloc(sizeof(int) * word_length);
+                // initializez permutarea                 
+                for(int index = 0; index < word_length; index++){
+                    permutation[index] = index;
+                }
+                generatePermutation(permutation, word_length);
+
+                // scriu permutarea in fisierul shm_keys
+                int offset_number = 0;
+                for(int i = 0; i < word_length; i++){
+                    sprintf(key_ptr + (offset * index) + offset_number, "%d ", permutation[i]);
+                    offset_number+=2;
+                }
+                sprintf(key_ptr + (offset * index) + offset_number, "\n");
+
+                // modific cuvantul
+                char * modified_word = (char *)malloc(sizeof(char) * word_length);
+                for(int letter = 0; letter < word_length; letter++)
+                    modified_word[letter] = word[permutation[letter]];
+
+                sprintf(words[index].location, "%s\n", modified_word);
+                return 0;
+            }
+        }
+        for(int index = 0; index < word_count; index ++)
+            wait(NULL);
+
+        return 0;
+    
     }
     else if (argc == 3){
         // decriptarea fisierului
@@ -182,8 +191,6 @@ int main(int argc, char *argv[]){
 }
 int getNumber(int * permutation, int length){
     // algoritmul fisher-yates
-    srand(time(NULL));
-
     // extrag un numar random de la 0-length
     int index = rand() % length;
     // si aleg numarul din permutare care se gaseste la indexul random extras
