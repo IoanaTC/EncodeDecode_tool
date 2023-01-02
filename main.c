@@ -9,15 +9,16 @@
 #include<sys/mman.h>
 #include<sys/wait.h>
 #include<time.h>
+#define SIZE 4096
+#define offset 200
 
-int offset = 100;
 // programul primeste un singur parametru => un fisier
 // - spre a fi criptat
 // programul primeste fisierul criptat, respectiv permutarile folosite
 // - returneaza fisierul decriptat (+ sterge fisierul cu permutari)
 
 int getNumber(int *permutation, int length);
-void generatePermutation(int * permutation, int length, char * shm_keys, void * keys_ptr, int word_index);
+void generatePermutation(int * permutation, int length);
 
 int main(int argc, char *argv[]){
     pid_t pid;
@@ -50,6 +51,8 @@ int main(int argc, char *argv[]){
             perror("Truncate error");
             return errno;
         }
+        // mapez sursa
+        void *shm_ptr = mmap(0, SRC_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
 
         // copiez datele din fiserul sursa in fiserul de memorie partajata
         pid = fork();
@@ -81,13 +84,13 @@ int main(int argc, char *argv[]){
                 return errno;
             }
             // def dimensiune
-            if(ftruncate(dst_key_fd, 2 * SRC_SIZE) == -1){
+            if(ftruncate(dst_key_fd, SIZE) == -1){
                 perror("Truncate error");
                 return errno;
             }
 
             // mapez fisierul de permutari pentru a il putea formata
-            void *key_ptr = mmap(0, 2 * SRC_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, dst_key_fd, 0);
+            void *key_ptr = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, dst_key_fd, 0);
 
             // citesc datele din fisierul sursa
 
@@ -113,44 +116,56 @@ int main(int argc, char *argv[]){
                 }
             }
             buff[SRC_SIZE] = '\0';
+
+            // parcurg bufferul si extrag toate cuvintele
+            char * words[1000];
             
-            // mapez sursa
-            void *shm_ptr = mmap(0, SRC_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-
-            // parcurg fisierul sursa
-            // iar pentru fiecare cuvant, un proces va genera o permutare si va codifica cuvantul in cauza
-            // cuvantul codificat va fi stocat, la final, in fisierul cu extensia .out, iar permutarea in fisierul _key.out
-            int index = 0;
-
-            shm_ptr = strtok(buff, "\n ,.!?;"); // adaugarea mai multor semne de punctuatie
+            int word_index = 0;
+            shm_ptr = strtok(buff, "\n ,.!?;"); // adaugarea mai multor semne de punctuatie  
             while(shm_ptr != NULL){
+                words[word_index++] = (char*)shm_ptr;
+                shm_ptr = strtok(0, "\n ,.!?;");
+            }
+            int word_count = word_index;
 
-                pid = fork();
-                if(pid < 0){
+            // pentru fiecare cuvant
+            // generez o permutare si realizez criptarea acestuia
+            // salvez permutarea, respectiv cuvantul criptat in shm_keys, respectiv shm_name
+            pid_t encriptor_pid;
+            for(int index = 0; index < word_count; index ++){
+                
+                encriptor_pid = fork();
+
+                if(encriptor_pid < 0){
                     perror("Encription - Fork error");
                     return errno;
                 }
-                else if(pid == 0){
-                    char * word = (char*)malloc(strlen(shm_ptr) * sizeof(char)); // cuvantul curent
-                    int* word_index = malloc(sizeof(int));
-
-                    *word_index = index ++;
-                    word = shm_ptr;
-                    
+                else if(encriptor_pid == 0){
+                    char * word = words[index]; //cuvantul curent
                     int word_length = strlen(word); // lungimea cuvantului curent
-
+                    
                     // generez o permutare
+
                     int *permutation = (int*)malloc(sizeof(int) * word_length);
                     // initializez permutarea                 
                     for(int index = 0; index < word_length; index++){
                         permutation[index] = index;
                     }
-                    generatePermutation(permutation, word_length, shm_keys, key_ptr, *word_index);
-                    
+                    generatePermutation(permutation, word_length);
+                    // scriu permutarea in fisierul shm_keys
+
+                    int number = 0;
+                    for(int i = 0; i < word_length; i++){
+                        sprintf(key_ptr + (offset * index) + number, "%d ", permutation[i]);
+                        number = number + 2;
+                    }
+                    sprintf(key_ptr + (offset * index) + number, "\n");
                     return 0;
                 }
-                return 0;
             }
+            for(int index = 0; index < word_count; index ++)
+                wait(NULL);
+
             return 0;
         }
     }
@@ -181,7 +196,7 @@ int getNumber(int * permutation, int length){
     // pentru a nu fi ales din nou
     return number;
 }
-void generatePermutation(int * permutation, int length, char * shm_keys, void * keys_ptr, int word_index){
+void generatePermutation(int * permutation, int length){
     // generator de permutari in sigma(lungimea cuvantului)
 
     int word_length = length;
@@ -194,12 +209,6 @@ void generatePermutation(int * permutation, int length, char * shm_keys, void * 
         length = length - 1;
     }
     // <=> este realizat un swap intre numarul random ales si ultimul numar din array
-
-    // scriu permutarea in fisierul shm_keys
-    for(int index = 0; index < word_length; index++){
-        sprintf(keys_ptr + offset * word_index + 10, "%d ", permutation[index]);
-    }
-    sprintf(keys_ptr + offset * word_index + 10, "\n");
 }
 // // fisierul destinatie, folosind denumirea unica a fisierului sursa, filename.out
             // char *dst_source = strcat(strtok(src_path, "."), ".out");
