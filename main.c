@@ -13,11 +13,8 @@
 
 #define SIZE 1024
 #define offset 200
-struct word_pointer{
-    char * location;
-    char * word;
-};
-typedef struct word_pointer word_pointer;
+
+
 
 // programul primeste un singur parametru => un fisier
 // - spre a fi criptat
@@ -30,6 +27,7 @@ void generatePermutation(int * permutation, int length);
 int main(int argc, char *argv[]){
 
     if (argc == 2){
+        srand(time(0));
         // programul a primit un singur parametru, un fisier care trebuie criptat
         // criptarea fisierului
 
@@ -97,42 +95,27 @@ int main(int argc, char *argv[]){
         }
         buff[SRC_SIZE] = '\0';
         // parcurg bufferul si extrag toate cuvintele in vectorul de cuvinte
-        word_pointer words[1000];
+        char * words[1000];
+
         int word_index = 0;
-        const char * delim = " \n";
-        char * src_ptr = strtok(buff, delim); // adaugarea mai multor semne de punctuatie 
+        char * src_ptr = strtok(buff, "\n "); // adaugarea mai multor semne de punctuatie 
 
         while(src_ptr != NULL){
-                                    printf("%s ", (char *) src_ptr);
-
-            char * pointer = (char *) src_ptr;
-            int length = strlen(pointer);
-
-            word_pointer word;
-
-            if(isspace(pointer[length]))
-                pointer[length] = '\0';
-            if(isspace(pointer[0]))
-                pointer = pointer + 1;
-
-            word.word = pointer;
-
-            word.location = strstr((char*) src_map, pointer);
-
-            words[word_index] = word;
-            word_index = word_index + 1;
-
-            src_ptr = strtok(NULL, delim);
+            words[word_index++] = src_ptr;
+            src_ptr = strtok(0, "\n ");
         }
         int word_count = word_index;
 
-        // for(int i=0; i< word_count; i++)
-        // {
-        //     printf("%s ", words[i].word);
-        // }
+
+        // printf("%d\n", word_count);
+
+        // for(int i=0; i<word_count; i++)
+        //     printf("%s\n", words[i]);
+
+
         // pentru fiecare cuvant
         // generez o permutare si realizez criptarea acestuia
-        // salvez permutarea, respectiv cuvantul criptat in shm_keys, respectiv shm_name
+        // salvez permutarea in shm_keys
         pid_t encriptor_pid;
         for(int index = 0; index < word_count; index ++){
             
@@ -143,9 +126,11 @@ int main(int argc, char *argv[]){
                 return errno;
             }
             else if(encriptor_pid == 0){
-                char * word = words[index].word; //cuvantul curent
-                int word_length = strlen(word); // lungimea cuvantului curent
-                
+                int word_length = strlen(words[index]); // lungimea cuvantului curent
+
+                char * word = (char *) malloc(word_length * sizeof(char));
+                word = words[index]; //cuvantul curent
+
                 // generez o permutare
 
                 int *permutation = (int*)malloc(sizeof(int) * word_length);
@@ -154,7 +139,9 @@ int main(int argc, char *argv[]){
                     permutation[index] = index;
                 }
                 generatePermutation(permutation, word_length);
-
+                // for(int i=0; i<word_length; i++)
+                //     printf("%d ", permutation[i]);
+                // printf("\n");
                 // scriu permutarea in fisierul shm_keys
                 int offset_number = 0;
                 for(int i = 0; i < word_length; i++){
@@ -166,9 +153,11 @@ int main(int argc, char *argv[]){
                 // modific cuvantul
                 char * modified_word = (char *)malloc(sizeof(char) * word_length);
                 for(int letter = 0; letter < word_length; letter++)
-                    modified_word[letter] = word[permutation[letter]];
+                    {
+                        modified_word[letter] = word[permutation[letter]];
+                        printf("%s %s\n", modified_word, word);
+                    }
 
-                sprintf(words[index].location, "%s\n", modified_word);
                 return 0;
             }
         }
@@ -180,6 +169,7 @@ int main(int argc, char *argv[]){
     }
     else if (argc == 3){
         // decriptarea fisierului
+        return 0;
     }
     else{
         // apel invalid
