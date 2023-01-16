@@ -14,7 +14,11 @@
 #define SIZE 1024
 #define offset 200
 
-
+struct word {
+    char ** addrs;
+    char * word;
+};
+typedef struct word word;
 
 // programul primeste un singur parametru => un fisier
 // - spre a fi criptat
@@ -93,19 +97,23 @@ int main(int argc, char *argv[]){
                 return errno;
             }
         }
-        buff[SRC_SIZE] = '\0';
         // parcurg bufferul si extrag toate cuvintele in vectorul de cuvinte
-        char * words[1000];
+
+        word words[1000];
 
         int word_index = 0;
         char * src_ptr = strtok(buff, "\n "); // adaugarea mai multor semne de punctuatie 
 
         while(src_ptr != NULL){
-            words[word_index++] = src_ptr;
+            word word_location;
+
+            word_location.word = src_ptr;
+            word_location.addrs = &src_ptr;
+
+            words[word_index++] = word_location;
             src_ptr = strtok(0, "\n ");
         }
         int word_count = word_index;
-
 
         // printf("%d\n", word_count);
 
@@ -126,11 +134,10 @@ int main(int argc, char *argv[]){
                 return errno;
             }
             else if(encriptor_pid == 0){
-                int word_length = strlen(words[index]); // lungimea cuvantului curent
+                int word_length = strlen(words[index].word); // lungimea cuvantului curent
 
                 char * word = (char *) malloc(word_length * sizeof(char));
-                word = words[index]; //cuvantul curent
-
+                word = words[index].word; //cuvantul curent
                 // generez o permutare
 
                 int *permutation = (int*)malloc(sizeof(int) * word_length);
@@ -153,11 +160,9 @@ int main(int argc, char *argv[]){
                 // modific cuvantul
                 char * modified_word = (char *)malloc(sizeof(char) * word_length);
                 for(int letter = 0; letter < word_length; letter++)
-                    {
-                        modified_word[letter] = word[permutation[letter]];
-                        printf("%s %s\n", modified_word, word);
-                    }
-
+                    modified_word[letter] = word[permutation[letter]];
+                    
+                sprintf(src_map + (offset * index), "%s", modified_word);
                 return 0;
             }
         }
