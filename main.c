@@ -128,10 +128,9 @@ int main(int argc, char *argv[]){
                 // am modificat inca un cuvant
                 word_count += 1;
                 // cautam urmatorul cuvant, daca exista
-                i += 1;
             }
             // setam mereu inceputul unui potential nou cuvant
-            delimitator = i;
+            delimitator = i + 1;
         }
         // asteptam criptarea completa a cuvintelor
         for(int i = 0; i< word_count; i++)
@@ -264,10 +263,9 @@ int main(int argc, char *argv[]){
                 // am modificat inca un cuvant
                 word_count += 1;
                 // cautam urmatorul cuvant, daca exista
-                i += 1;
             }
             // setam mereu inceputul unui potential nou cuvant
-            delimitator = i;
+            delimitator = i + 1;
         }
         for(int i = 0; i < word_count; i++)
             wait(NULL);
