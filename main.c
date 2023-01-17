@@ -161,6 +161,18 @@ int main(int argc, char *argv[]){
                 return errno;
             }
         }
+        if(munmap(src_mem, SRC_SIZE) < 0){
+            perror("Munmap error");
+            return errno;
+        }
+        if(shm_unlink(shm_keys) < 0){
+            perror("Shm unlink error");
+            return errno;
+        }
+        if(munmap(key_ptr, SIZE) < 0){
+            perror("Munmap error");
+            return errno;
+        }
         return 0;
     }
     else if (argc == 3){
@@ -275,6 +287,14 @@ int main(int argc, char *argv[]){
                 return errno;
             }
             return 0;
+        }
+        if(munmap(src_mem, SRC_SIZE) < 0){
+            perror("Munmap error");
+            return errno;
+        }
+        if(munmap(key_ptr, SIZE) < 0){
+            perror("Munmap error");
+            return errno;
         }
         return 0;
     }
