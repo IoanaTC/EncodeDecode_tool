@@ -1,3 +1,11 @@
-# Encriptor-Decriptor
 
-![image](https://user-images.githubusercontent.com/93096750/208245617-94e37790-9323-4e26-bbdf-bf237a80ad70.png)
+Un mic tool care:
+
+:lock: criptează fiecare cuvânt dintr-un text dat, aplicând câte o permutare generată random - pe care o stochează într-un fișier auxiliar
+
+:unlock: descifrează textul criptat, folosind fişierul cu cheile aplicate, pe care îl şterge după folosire
+
+
+
+
+![](https://github.com/IoanaTC/EncodeDecode_tool/blob/main/Media/ed.gif)
