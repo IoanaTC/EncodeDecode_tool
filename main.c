@@ -257,9 +257,25 @@ int main(int argc, char *argv[]){
             // setam mereu inceputul unui potential nou cuvant
             delimitator = i;
         }
-
+        for(int i = 0; i < word_count; i++)
+            wait(NULL);
+            
         // stergem fisierul cu permutarile, nu mai este necesar
-        
+        pid = fork();
+        if(pid < 0){
+            perror("Erase key file - Fork error");
+            return errno;
+        }
+        else if(pid == 0){
+            // procesul copil va executa stergerea
+            char * rm_argv[] = {"rm", dst_key, NULL}; // argumentele comenzii
+
+            if(execve("/usr/bin/rm", rm_argv, NULL) < 0){
+                perror("Erase - Execve error");
+                return errno;
+            }
+            return 0;
+        }
         return 0;
     }
     else{
