@@ -12,7 +12,6 @@
 #include<ctype.h>
 
 #define SIZE 1024
-#define offset 200
 
 // programul primeste un singur parametru => un fisier
 // - spre a fi criptat
@@ -66,13 +65,14 @@ int main(int argc, char *argv[]){
         }
 
         // mapez fisierul de permutari pentru a il putea formata
-        void *key_ptr = mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, dst_key_fd, 0);
+        char *key_ptr = mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, dst_key_fd, 0);
 
         // citesc datele din fisierul sursa
         int delimitator = 0;
         pid_t pid;
         int word_count = 0;
-        for(int i = 0; i < SRC_SIZE; i++){
+        int offset = 0;
+        for(int i = 0; i <= SRC_SIZE; i++){
             // caracterul este litera, cratima sau apostrof -> face parte dintr-un cuvant
             if(isalpha(src_mem[i]) || src_mem[i] == '-' || src_mem[i] == '\'')
                 continue;
@@ -104,14 +104,18 @@ int main(int argc, char *argv[]){
                         permutation[index] = index;
                     }
                     generatePermutation(permutation, word_length);
+                    
+                    for(int index=0; index< word_length; index++)
+                        printf("%d ", permutation[index]);
+                    printf("\n");
 
                     // scriu permutarea in fisierul shm_keys
                     int offset_number = 0;
                     for(int index = 0; index < word_length; index++){
-                        sprintf(key_ptr + (offset * word_count) + offset_number, "%d ", permutation[index]);
-                        offset_number+=2;
+                        sprintf(key_ptr + offset + offset_number, "%d ", permutation[index]);
+                        offset_number += 2;
                     }
-                    sprintf(key_ptr + (offset * word_count) + offset_number, "\n");
+                    sprintf(key_ptr + offset  + offset_number, "\n");
 
                     // modific cuvantul
                     for(int letter = 0; letter < word_length; letter++)
@@ -119,16 +123,47 @@ int main(int argc, char *argv[]){
                     
                     return 0;
                 }
-                
+                offset += 2*word_length + 1;
+                // am modificat inca un cuvant
                 word_count += 1;
+                // caracterul end of line este perceput drept un caracter, dar reprezentat drept 2
+                // if(src_mem[i] == '\n')
+                //     i -= 1;
+                // cautam urmatorul cuvant, daca exista
                 i += 1;
             }
-
-            delimitator = i + 1;
+            // setam mereu inceputul unui potential nou cuvant
+            delimitator = i;
         }
+        // asteptam criptarea completa a cuvintelor
+        for(int i = 0; i< word_count; i++)
+            wait(NULL);
+        // crearea fisierului cu key-urile generate la criptare
+        //fisierul cu permutarile folosite in codarea cuvintelor, filename_key.out
+        char *dst_key = strcat(strtok(src_path, "."), "_key.out");
 
+        int key_fd = open(dst_key, O_RDWR | O_CREAT, S_IRWXU); // file descriptorul fisierului cu cheile generate
+        if(key_fd < 0){
+            perror("Open destination key file failed");
+            return errno;
+        }
+        // copierea datelor in fisierul generat
+        int size = strlen(key_ptr);
+        size_t bytes_written = write(key_fd, key_ptr, size);
+        if(bytes_written < 0){
+            perror("Write failed");
+            return errno;
+        }
+        // ne asiguram ca toate datele din buf au fost transportate corect
+        for(size_t index = bytes_written; index < size; index+=bytes_written){
+
+            bytes_written = write(key_fd, key_ptr + index, size - index);
+            if(bytes_written < 0){
+                perror("Write error");
+                return errno;
+            }
+        }
         return 0;
-    
     }
     else if (argc == 3){
         // decriptarea fisierului
@@ -170,20 +205,3 @@ void generatePermutation(int * permutation, int length){
     }
     // <=> este realizat un swap intre numarul random ales si ultimul numar din array
 }
-// // fisierul destinatie, folosind denumirea unica a fisierului sursa, filename.out
-            // char *dst_source = strcat(strtok(src_path, "."), ".out");
-
-            // int dst_fd = open(dst_source, O_RDWR | O_CREAT, S_IRWXU);
-            // if(dst_fd < 0){
-            //     perror("Open destination file failed");
-            //     return errno;
-            // }
-
-            // fisierul cu permutarile folosite in codarea cuvintelor, filename_key.out
-            //char *dst_key = strcat(strtok(src_path, "."), "_key.out");
-
-            //int dst_key_fd = open(dst_key, O_RDWR | O_CREAT, S_IRWXU);
-            // if(dst_key_fd < 0){
-            //     perror("Open destination key file failed");
-            //     return errno;
-            // }
