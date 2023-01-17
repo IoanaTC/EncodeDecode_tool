@@ -14,12 +14,6 @@
 #define SIZE 1024
 #define offset 200
 
-struct word {
-    char ** addrs;
-    char * word;
-};
-typedef struct word word;
-
 // programul primeste un singur parametru => un fisier
 // - spre a fi criptat
 // programul primeste fisierul criptat, respectiv permutarile folosite
@@ -31,12 +25,20 @@ void generatePermutation(int * permutation, int length);
 int main(int argc, char *argv[]){
 
     if (argc == 2){
+        // creez un seed pentru generatorul de elemente ale permutarii
         srand(time(0));
+
         // programul a primit un singur parametru, un fisier care trebuie criptat
-        // criptarea fisierului
+        // -> criptarea fisierului
 
+        // pregatirea datelor pentru criptare
         char *src_path = argv[1]; // fisierul transmis ca parametru
-
+        // deschid fisierul sursa
+        int src_fd = open(src_path, O_RDWR, S_IRUSR | S_IWUSR); // file descriptor pentru fisierul sursa
+        if(src_fd < 0){
+            perror("Open src error");
+            return errno;
+        }
         // folosesc o structura stat pentru a colecta informatii despre src_path
         struct stat stat_buf;
         if(stat(src_path, &stat_buf) < 0){
@@ -44,17 +46,9 @@ int main(int argc, char *argv[]){
             perror("Stat failed to load");
             return errno;
         }
-
         int SRC_SIZE = stat_buf.st_size; // dimensiunea fisierului
-
-        // deschid fisierul sursa
-        int src_fd = open(src_path, O_RDWR);
-        if(src_fd < 0){
-            perror("Open src error");
-            return errno;
-        }
         // mapez sursa
-        void *src_map = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, src_fd, 0);
+        char *src_mem = mmap(NULL, SRC_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, src_fd, 0);
 
         // creez un fisier de memorie partajata pentru a stoca permutarile folosite
         // de catre fiecare proces in parte
@@ -72,102 +66,66 @@ int main(int argc, char *argv[]){
         }
 
         // mapez fisierul de permutari pentru a il putea formata
-        void *key_ptr = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, dst_key_fd, 0);
+        void *key_ptr = mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, dst_key_fd, 0);
 
         // citesc datele din fisierul sursa
-
-        // buffer in care voi citi datele din fisierul sursa
-        char *buff = (char*) malloc(SRC_SIZE * sizeof(char) + 1);
-        if(buff == NULL){
-            perror("Malloc failed");
-            return errno;
-        }
-        
-        // citirea datelor
-        size_t bytes_read = read(src_fd, buff, SRC_SIZE);
-        if(bytes_read < 0){
-            perror("Read failed");
-            return errno;
-        }
-        // ma asigur ca datele din fisier au fost corect citite
-        for(size_t index = bytes_read; index < SRC_SIZE; index += bytes_read){
-            bytes_read = read(src_fd, buff + index, SRC_SIZE - index);
-            if(bytes_read < 0){
-                perror("Read failed");
-                return errno;
-            }
-        }
-        // parcurg bufferul si extrag toate cuvintele in vectorul de cuvinte
-
-        word words[1000];
-
-        int word_index = 0;
-        char * src_ptr = strtok(buff, "\n "); // adaugarea mai multor semne de punctuatie 
-
-        while(src_ptr != NULL){
-            word word_location;
-
-            word_location.word = src_ptr;
-            word_location.addrs = &src_ptr;
-
-            words[word_index++] = word_location;
-            src_ptr = strtok(0, "\n ");
-        }
-        int word_count = word_index;
-
-        // printf("%d\n", word_count);
-
-        // for(int i=0; i<word_count; i++)
-        //     printf("%s\n", words[i]);
-
-
-        // pentru fiecare cuvant
-        // generez o permutare si realizez criptarea acestuia
-        // salvez permutarea in shm_keys
-        pid_t encriptor_pid;
-        for(int index = 0; index < word_count; index ++){
+        int delimitator = 0;
+        pid_t pid;
+        int word_count = 0;
+        for(int i = 0; i < SRC_SIZE; i++){
+            // caracterul este litera, cratima sau apostrof -> face parte dintr-un cuvant
+            if(isalpha(src_mem[i]) || src_mem[i] == '-' || src_mem[i] == '\'')
+                continue;
             
-            encriptor_pid = fork();
+            // am intalnit un caracter despartitor
+            // delimitam cuvantul gasit
+            if(isalpha(src_mem[i - 1]) || src_mem[i - 1] == '-' || src_mem[i - 1] == '\'')
+            {
+                // pozitia cuvantului curent
+                char * current_word = src_mem + delimitator; 
+                // lungimea cuvantului curent
+                int word_length = i - delimitator; 
 
-            if(encriptor_pid < 0){
-                perror("Encription - Fork error");
-                return errno;
-            }
-            else if(encriptor_pid == 0){
-                int word_length = strlen(words[index].word); // lungimea cuvantului curent
+                char * word = (char *) malloc(sizeof(char) * word_length); //cuvantul curent
+                strncpy(word, src_mem + delimitator, word_length);
 
-                char * word = (char *) malloc(word_length * sizeof(char));
-                word = words[index].word; //cuvantul curent
-                // generez o permutare
+                // criptarea cuvantului
+                pid = fork();
 
-                int *permutation = (int*)malloc(sizeof(int) * word_length);
-                // initializez permutarea                 
-                for(int index = 0; index < word_length; index++){
-                    permutation[index] = index;
+                if(pid < 0){
+                    perror("Encriptor fork failed!");
+                    return errno;
                 }
-                generatePermutation(permutation, word_length);
-                // for(int i=0; i<word_length; i++)
-                //     printf("%d ", permutation[i]);
-                // printf("\n");
-                // scriu permutarea in fisierul shm_keys
-                int offset_number = 0;
-                for(int i = 0; i < word_length; i++){
-                    sprintf(key_ptr + (offset * index) + offset_number, "%d ", permutation[i]);
-                    offset_number+=2;
-                }
-                sprintf(key_ptr + (offset * index) + offset_number, "\n");
+                if(pid == 0){
+                    int *permutation = (int*)malloc(sizeof(int) * word_length);
 
-                // modific cuvantul
-                char * modified_word = (char *)malloc(sizeof(char) * word_length);
-                for(int letter = 0; letter < word_length; letter++)
-                    modified_word[letter] = word[permutation[letter]];
+                    // initializez permutarea
+                    for(int index = 0; index < word_length; index++){
+                        permutation[index] = index;
+                    }
+                    generatePermutation(permutation, word_length);
+
+                    // scriu permutarea in fisierul shm_keys
+                    int offset_number = 0;
+                    for(int index = 0; index < word_length; index++){
+                        sprintf(key_ptr + (offset * word_count) + offset_number, "%d ", permutation[index]);
+                        offset_number+=2;
+                    }
+                    sprintf(key_ptr + (offset * word_count) + offset_number, "\n");
+
+                    // modific cuvantul
+                    for(int letter = 0; letter < word_length; letter++)
+                        current_word[letter] = word[permutation[letter]];
                     
-                sprintf(src_map + (offset * index), "%s", modified_word);
-                return 0;
+                    return 0;
+                }
+                
+                word_count += 1;
+                i += 1;
             }
+
+            delimitator = i + 1;
         }
-        for(int index = 0; index < word_count; index ++)
-            wait(NULL);
 
         return 0;
     
