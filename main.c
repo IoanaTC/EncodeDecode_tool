@@ -67,9 +67,9 @@ int main(int argc, char *argv[]){
         // mapez fisierul de permutari pentru a il putea formata
         char *key_ptr = mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, dst_key_fd, 0);
 
+        pid_t pid;
         // citesc datele din fisierul sursa
         int delimitator = 0;
-        pid_t pid;
         int word_count = 0;
         int offset = 0;
         for(int i = 0; i <= SRC_SIZE; i++){
@@ -123,12 +123,10 @@ int main(int argc, char *argv[]){
                     
                     return 0;
                 }
+                // setam offsetul pentru a scrie urmatoarea permutare in fisier
                 offset += 2*word_length + 1;
                 // am modificat inca un cuvant
                 word_count += 1;
-                // caracterul end of line este perceput drept un caracter, dar reprezentat drept 2
-                // if(src_mem[i] == '\n')
-                //     i -= 1;
                 // cautam urmatorul cuvant, daca exista
                 i += 1;
             }
@@ -167,6 +165,101 @@ int main(int argc, char *argv[]){
     }
     else if (argc == 3){
         // decriptarea fisierului
+        char *src_path = argv[1]; // fisierul criptat
+        char *dst_key = argv[2]; // fisierul cu permutari
+
+        // deschid fisierul sursa
+        int src_fd = open(src_path, O_RDWR, S_IRUSR | S_IWUSR); // file descriptor pentru fisierul sursa
+        if(src_fd < 0){
+            perror("Open src error");
+            return errno;
+        }
+        // folosesc o structura stat pentru a colecta informatii despre src_path
+        struct stat stat_buf;
+        if(stat(src_path, &stat_buf) < 0){
+            // s-a produs o eroare => terminarea procesului
+            perror("Stat failed to load");
+            return errno;
+        }
+        int SRC_SIZE = stat_buf.st_size; // dimensiunea fisierului
+        // mapez sursa
+        char *src_mem = mmap(NULL, SRC_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, src_fd, 0);
+
+        // deschid fisierul cu permutari
+        int key_fd = open(dst_key, O_RDWR, S_IRWXU); // file descriptorul fisierului cu cheile generate
+        if(key_fd < 0){
+            perror("Open key file failed");
+            return errno;
+        }
+        // mapez fisierul de permutari pentru a il putea parcurge
+        char *key_ptr = mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, key_fd, 0);
+
+        pid_t pid;
+        // citesc datele din fisierul sursa
+        int delimitator = 0;
+        int word_count = 0;
+        int offset = 0;
+        for(int i = 0; i <= SRC_SIZE; i++){
+            // caracterul este litera, cratima sau apostrof -> face parte dintr-un cuvant
+            if(isalpha(src_mem[i]) || src_mem[i] == '-' || src_mem[i] == '\'')
+                continue;
+            
+            // am intalnit un caracter despartitor
+            // delimitam cuvantul gasit
+            if(isalpha(src_mem[i - 1]) || src_mem[i - 1] == '-' || src_mem[i - 1] == '\'')
+            {
+                // pozitia cuvantului curent
+                char * current_word = src_mem + delimitator; 
+                // lungimea cuvantului curent
+                int word_length = i - delimitator; 
+
+                char * word = (char *) malloc(sizeof(char) * word_length); //cuvantul curent
+                strncpy(word, src_mem + delimitator, word_length);
+
+                // criptarea cuvantului
+                pid = fork();
+
+                if(pid < 0){
+                    perror("Encriptor fork failed!");
+                    return errno;
+                }
+                if(pid == 0){
+                    int *permutation = (int*)malloc(sizeof(int) * word_length);
+
+                    // extrag permutarea
+                    int index = 0;
+                    while(key_ptr[offset] != '\n'){
+                        permutation[index ++] = key_ptr[offset] - '0';
+                        offset ++;
+
+                        if(key_ptr[offset] == '\n')
+                            break;
+                        offset ++;
+                    }
+
+                    for(int e = 0; e < word_length; e++)
+                        printf("%d ", permutation[e]);
+                    printf("\n");
+
+                    // modific cuvantul
+                    for(int letter = 0; letter < word_length; letter++)
+                        current_word[permutation[letter]] = word[letter];
+                    
+                    return 0;
+                }
+                // setam offsetul pentru a scrie urmatoarea permutare in fisier
+                offset += 2*word_length + 1;
+                // am modificat inca un cuvant
+                word_count += 1;
+                // cautam urmatorul cuvant, daca exista
+                i += 1;
+            }
+            // setam mereu inceputul unui potential nou cuvant
+            delimitator = i;
+        }
+
+        // stergem fisierul cu permutarile, nu mai este necesar
+        
         return 0;
     }
     else{
